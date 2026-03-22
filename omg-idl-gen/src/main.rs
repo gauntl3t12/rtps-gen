@@ -69,6 +69,7 @@ fn main() -> Result<(), std::io::Error> {
 mod tests {
     use omg_idl_code_gen::{generate_with_search_path, Configuration};
     use std::{
+        fs,
         fs::File,
         io::{Read, Seek, SeekFrom, Write},
         path::Path,
@@ -129,6 +130,32 @@ mod tests {
                 test_files.push(tmp_file);
             }
         }
+    }
+
+    #[test]
+    fn self_include_does_not_recurse_forever() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let input = r#"#include "./input.idl"
+module DDS {
+    typedef long Foo;
+};"#;
+        fs::write(temp_dir.path().join("input.idl"), input).unwrap();
+
+        let config = Configuration::new(temp_dir.path(), Path::new("input.idl"), false);
+        let mut out = tempfile::tempfile().unwrap();
+        let result = generate_with_search_path(&mut out, &config);
+
+        assert!(
+            result.is_ok(),
+            "self include should be handled without recursion"
+        );
+        out.seek(SeekFrom::Start(0)).unwrap();
+        let mut generated = String::new();
+        out.read_to_string(&mut generated).unwrap();
+        assert!(
+            generated.contains("pub type Foo = i32;"),
+            "missing expected typedef in output"
+        );
     }
 
     fn testvector_verify(testvector: &str, tmp_file: &mut File) {

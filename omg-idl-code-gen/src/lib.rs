@@ -13,6 +13,7 @@ use pest::{
     Parser, RuleType,
 };
 use std::{
+    collections::HashSet,
     fs::File,
     io::{self, Read, Write},
     path::{Path, PathBuf},
@@ -62,6 +63,7 @@ type Scope = Vec<String>;
 struct Context<'i> {
     config: &'i Configuration,
     root_module: IdlModule,
+    included_files: HashSet<PathBuf>,
 }
 
 impl<'i> Context<'i> {
@@ -69,7 +71,12 @@ impl<'i> Context<'i> {
         Context {
             config,
             root_module: IdlModule::new(None),
+            included_files: HashSet::new(),
         }
+    }
+
+    fn normalize_path(path: PathBuf) -> PathBuf {
+        path.canonicalize().unwrap_or(path)
     }
 
     /// Find the desired module under the root_module or create it if it
@@ -963,6 +970,11 @@ impl<'i> Context<'i> {
             Rule::include_directive => {
                 if let Some(ref p) = pair.clone().into_inner().nth(0) {
                     let fname = PathBuf::from(p.as_str());
+                    let full_path = Self::normalize_path(self.config.search_path.join(&fname));
+                    if !self.included_files.insert(full_path.clone()) {
+                        return Ok(());
+                    }
+
                     let data = loader
                         .load(&fname)
                         .map_err(|_| IdlError::FileNotFound(fname))?;
@@ -1000,6 +1012,8 @@ fn generate_with_loader<W: Write, L: IdlLoader>(
     config: &Configuration,
 ) -> Result<(), IdlError<Rule>> {
     let mut ctx = Context::new(config);
+    let root_path = Context::normalize_path(config.search_path.join(&config.idl_file));
+    ctx.included_files.insert(root_path);
 
     let idl_file = config.idl_file.clone();
     let idl_file_data = loader
